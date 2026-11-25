@@ -11,14 +11,20 @@
   const campuses = ['中心','洪家楼','趵突泉','兴隆山','软件园','青岛'];
   const voteNames = ['印象','环节','决胜'];
   const gradeNames = ['大一','大二','大三','大四'];
+  const gradeThresholds = [0,30,75,135];
+  const growthBudgets = {low:12,medium:16,high:20};
+  const lifeNames = {graduate:'本科毕业篇',sdu:'山大研究生篇',elsewhere:'外校研究生篇'};
+  const matchMastery = 6;
+  const inkMastery = {cost:8,points:15};
   const baseCharacters = [
-    ['初稿主笔',0,0,[82,56,74,68,60]],
-    ['即席追问',1,1,[58,83,67,76,56]],
-    ['安静收束',5,2,[69,56,64,72,79]],
-    ['交锋搭档',3,1,[66,76,61,77,60]],
-    ['稳场发言',2,2,[72,58,83,60,67]],
-    ['板书拆解',4,3,[60,70,58,88,70]]
-  ].map(([name,campus,grade,stats],i) => ({id:'p'+i,name,campus:campuses[campus],college:'',grade,stats,talents:[],lore:'试玩人物'}));
+    ['初稿主笔',0,'low',[0,2],[82,56,74,68,60]],
+    ['即席追问',1,'medium',[1,3],[56,82,65,74,55]],
+    ['安静收束',5,'medium',[4,3],[67,54,61,71,79]],
+    ['交锋搭档',3,'high',[1,3],[62,70,58,74,56]],
+    ['稳场发言',2,'low',[2,0],[72,58,83,60,67]],
+    ['板书拆解',4,'high',[3,4],[56,64,54,82,64]]
+  ].map(([name,campus,growth,focus,stats],i) => ({id:'p'+i,name,campus:campuses[campus],college:'',
+    growth,focus,stats,life:'',lifeStory:'',talents:[],lore:'试玩人物'}));
   const baseEvents = [
     ['还有五分钟交稿','flat',6,'all'],
     ['补上一条证据','flat',9,'1'],
@@ -70,14 +76,41 @@
     return scope==='all' || scope===String(phase.vote) || (scope==='duo' && phase.roles.length===2);
   }
 
-  function lineupBase(lineup, characters, training, round) {
+  function gradeIndex(mastery=0) {
+    return gradeThresholds.filter(threshold=>mastery>=threshold).length-1;
+  }
+
+  function addMastery(current, points) {
+    return Math.min(gradeThresholds.at(-1),current+points);
+  }
+
+  function growthPerGrade(character) {
+    const budget=growthBudgets[character.growth];
+    const weights=statNames.map((_,i)=>i===character.focus[0]?5:i===character.focus[1]?3:1);
+    const shares=weights.map(weight=>budget*weight);
+    const points=shares.map(share=>Math.floor(share/11));
+    const remaining=budget-points.reduce((total,value)=>total+value,0);
+    const priority=shares.map((share,i)=>({i,remainder:share%11})).sort((a,b)=>b.remainder-a.remainder);
+    for (const {i} of priority.slice(0,remaining)) points[i]++;
+    return points;
+  }
+
+  function effectiveStats(character, mastery) {
+    return character.panels[gradeIndex(mastery)];
+  }
+
+  function withGradePanels(character) {
+    if (character.panels) return character;
+    const {stats,growth='medium',focus=[0,3],...rest}=character;
+    const increments=growthPerGrade({growth,focus});
+    return {...rest,panels:gradeNames.map((_,year)=>stats.map((base,i)=>base+increments[i]*year))};
+  }
+
+  function lineupBase(lineup, characters, mastery, round) {
     const phase=allPhases[round];
     const individual=lineup.map((id,position) => {
-      const character=characters[id];
-      const gradeBonus=character.grade*2;
-      const growth=training[id] || 0;
-      return character.stats.reduce((sum,stat,i) =>
-        sum+(stat+gradeBonus+growth)*phase.weights[position][i]/100,0);
+      return effectiveStats(characters[id],mastery[id]||0).reduce((sum,stat,i) =>
+        sum+stat*phase.weights[position][i]/100,0);
     });
     return individual.reduce((total,score) => total+score,0)/individual.length;
   }
@@ -95,15 +128,15 @@
     return bonds.find(bond => bondCount(bond,team,characters)>=bond.count) || null;
   }
 
-  function scoreRound({round,lineup,characters,training,event,opponentEvent,bond}) {
-    const base=lineupBase(lineup,characters,training,round);
+  function scoreRound({round,lineup,characters,mastery,event,opponentEvent,bond}) {
+    const base=lineupBase(lineup,characters,mastery,round);
     const modifiers=[];
     const add=(label,effect,value) => modifiers.push({label,effect,value});
     if (event && ['flat','percent'].includes(event.effect)) add(event.name,event.effect,event.value);
     if (opponentEvent?.effect==='weaken' && event?.effect!=='guard') add(opponentEvent.name,'flat',-opponentEvent.value);
     for (const id of lineup) {
       for (const talent of characters[id].talents) {
-        if ((training[id] || 0)>=talent.tier && phaseMatches(talent.phase,round)) {
+        if (gradeIndex(mastery[id]||0)>=talent.tier && phaseMatches(talent.phase,round)) {
           add(characters[id].name+' · '+talent.name,talent.effect,talent.value);
         }
       }
@@ -132,8 +165,9 @@
     ];
   }
 
-  const rules={allPhases,statNames,campuses,voteNames,gradeNames,baseCharacters,baseEvents,initialTeam,initialDeck,
-    shuffle,legalLineups,spendAppearances,phaseMatches,lineupBase,matchingBond,scoreRound,roundVotes};
+  const rules={allPhases,statNames,campuses,voteNames,gradeNames,gradeThresholds,growthBudgets,lifeNames,matchMastery,inkMastery,
+    baseCharacters:baseCharacters.map(withGradePanels),baseEvents,initialTeam,initialDeck,shuffle,legalLineups,
+    spendAppearances,phaseMatches,lineupBase,matchingBond,scoreRound,roundVotes,gradeIndex,addMastery,effectiveStats,withGradePanels};
   if (typeof module!=='undefined') module.exports=rules;
   else globalThis.BianyuRules=rules;
 })();

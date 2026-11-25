@@ -5,8 +5,16 @@
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const grades=R.gradeNames;
   const fmt=value=>Number(value).toFixed(2);
-  const storageKey='bianyu-v03';
-  const sampleCampusColleges=['哲学与社会发展学院','经济学院','文学院','历史学院','考古学院','数学学院','物理学院','化学与化工学院','管理学院','马克思主义学院','国际教育学院','新闻传播学院','外国语学院','艺术学院','基础医学院','公共卫生学院','口腔医学院','护理与康复学院','药学院','材料科学与工程学院','机械工程学院','控制科学与工程学院','核科学与能源动力学院','电气工程学院','土建与水利学院','体育学院','软件学院','集成电路学院','密码科学与工程学院','人工智能学院','政治学与公共管理学院','法学院','信息科学与工程学院','计算机科学与技术学院','生命科学学院','环境科学与工程学院','网络空间安全学院'];
+  const storageKey='bianyu-v05';
+  const keepsakes=[
+    {id:'match',icon:'✦',name:'首场交锋',requirement:'完成一局三票对局',earned:state=>state.xp>0},
+    {id:'win',icon:'♜',name:'三票初胜',requirement:'赢得一局三票对局',earned:state=>state.profile.hasWin},
+    {id:'promotion',icon:'❖',name:'升阶纪念',requirement:'培养一名人物到大二',earned:state=>
+      Object.values(state.mastery).some(points=>R.gradeIndex(points)>=1)},
+    {id:'training',icon:'◉',name:'赛训留影',requirement:'领取一次赛训奖励',earned:state=>
+      state.trainingLog?.sessions.some(session=>session.claimedBy)}
+  ];
+  const wallLimit=3;
   const schema={
     character:{label:'人物',key:'characters',prefix:'p'},
     event:{label:'事件牌',key:'events',prefix:'e'},
@@ -16,16 +24,30 @@
   const scopes=[['all','任意阶段'],['0','印象'],['1','环节'],['duo','双人自由辩'],['2','决胜']];
   const scoreEffects=[['flat','固定加分'],['percent','百分比加分']];
   const eventEffects=[...scoreEffects,['weaken','对方减分'],['guard','抵挡减分'],['draw','额外抽牌']];
-  const upgrades=[8,12,16];
-  let game=null, tab='character', editing=null;
+  const lifeOptions=[['','暂未设定'],...Object.entries(R.lifeNames)];
+  const roundSeconds={solo:25,duo:35};
+  let game=null, tab='character', editing=null, clock=null, creatorArt='', activePage='home';
 
   function read(key) {
     try { return JSON.parse(localStorage.getItem(key)||'null'); } catch { return null; }
   }
   const previous=read('bianyu-demo-v1') || {};
-  const state={dust:previous.dust??80,ink:previous.ink??20,xp:previous.xp??0,college:previous.college??'',
-    team:[...R.initialTeam],deck:[...R.initialDeck],training:{},characters:[],events:[],talents:[],bonds:[],
-    ...(read(storageKey)||{})};
+  const oldSave=read('bianyu-v03');
+  const growthSave=read('bianyu-v04');
+  const currentSave=read(storageKey);
+  const oldMastery=Object.fromEntries(Object.entries(oldSave?.training||{}).map(([id,tier])=>
+    [id,R.gradeThresholds[tier]||0]));
+  const state={dust:previous.dust??80,ink:previous.ink??20,xp:previous.xp??0,
+    team:[...R.initialTeam],deck:[...R.initialDeck],characters:[],events:[],talents:[],bonds:[],
+    ...oldSave,mastery:oldMastery,...growthSave,...currentSave};
+  delete state.training;
+  delete state.college;
+  state.profile={nickname:'',bio:'',hasWin:false,earned:[],wall:[],...state.profile};
+  state.characters=state.characters.map(normalizeCharacter);
+
+  function normalizeCharacter({grade,...character}) {
+    return R.withGradePanels({life:'',lifeStory:'',growthNote:'',art:'',...character});
+  }
 
   function fromLegacy(cards) {
     const content={characters:[],events:[]};
@@ -33,8 +55,8 @@
       if (!card || typeof card.name!=='string') continue;
       const suffix=String(card.id||newId('old')).replace(/[^\w-]/g,'');
       if (card.type==='unit') {
-        content.characters.push({id:'previous-p-'+suffix,name:card.name,campus:R.campuses[0],college:'',grade:0,
-          stats:Array(5).fill(Math.min(100,60+(Number(card.power)||0)*3)),lore:card.lore||''});
+        content.characters.push(normalizeCharacter({id:'previous-p-'+suffix,name:card.name,campus:R.campuses[0],college:'',
+          stats:Array(5).fill(Math.min(100,60+(Number(card.power)||0)*3)),lore:card.lore||''}));
       } else if (card.type==='event') {
         const effect=card.effect==='draw'?'draw':card.effect==='weaken'?'weaken':'flat';
         content.events.push({id:'previous-e-'+suffix,name:card.name,effect,value:effect==='draw'?1:5,
@@ -44,8 +66,9 @@
     return content;
   }
 
-  if (!read(storageKey) && Array.isArray(previous.custom)) Object.assign(state,fromLegacy(previous.custom));
+  if (!currentSave && !growthSave && !oldSave && Array.isArray(previous.custom)) Object.assign(state,fromLegacy(previous.custom));
   function save() {
+    syncKeepsakes();
     try { localStorage.setItem(storageKey,JSON.stringify(state)); } catch { toast('浏览器无法保存，本次进度仅在当前页面有效。'); }
     renderProfile();
   }
@@ -59,23 +82,72 @@
   }
 
   function renderProfile() {
-    const identity=state.college||'尚未选择学院';
-    $('#collegeName').textContent=identity;
-    for (const id of ['#collegeIcon','#profileBtn']) $(id).textContent=(state.college||'山')[0];
+    const profile=state.profile;
+    $('#profileName').textContent=profile.nickname||'未设置昵称';
+    $('#profileBio').textContent=profile.bio||'写一段自我介绍，让队友认识你。';
+    for (const id of ['#profileIcon','#profileBtn']) $(id).textContent=Array.from(profile.nickname||'山')[0];
+    const shown=profile.wall.map(id=>keepsakes.find(item=>item.id===id)).filter(Boolean);
+    const wall=$('#keepsakeWall');
+    if (shown.length) {
+      wall.innerHTML=shown.map(item=>'<div class="keepsake-tile" title="'+item.requirement+
+        '"><span aria-hidden="true">'+item.icon+'</span><strong>'+item.name+'</strong></div>').join('');
+    } else {
+      wall.innerHTML='<p class="wall-empty">'+(profile.earned.length?'点「编辑档案」挑选展品。':'打完第一局，即可获得「首场交锋」。')+'</p>';
+    }
+    $('#keepsakeCount').textContent=shown.length+' / '+wallLimit+' 件';
     $('#dust').textContent=state.dust;
     $('#ink').textContent=state.ink;
     $('#xpbar').style.width=(state.xp%100)+'%';
     $('#xptext').textContent='账号等级 '+(1+Math.floor(state.xp/100))+' · '+(state.xp%100)+'/100 成长经验';
   }
 
+  function syncKeepsakes() {
+    const profile=state.profile;
+    for (const item of keepsakes) {
+      if (profile.earned.includes(item.id)||!item.earned(state)) continue;
+      profile.earned.push(item.id);
+      if (profile.wall.length<wallLimit) profile.wall.push(item.id);
+    }
+  }
+
+  function openProfile() {
+    const form=$('#profileForm');
+    const profile=state.profile;
+    form.elements.nickname.value=profile.nickname;
+    form.elements.bio.value=profile.bio;
+    $('#keepsakePicker').innerHTML=keepsakes.map(item=>{
+      const earned=profile.earned.includes(item.id);
+      const selected=profile.wall.includes(item.id);
+      return '<label class="keepsake-choice"><input type="checkbox" name="keepsake" value="'+item.id+'" '+
+        (earned?'':'disabled')+' '+(selected?'checked':'')+'><span><strong>'+item.name+
+        '</strong><small>'+(earned?'已获得':item.requirement)+'</small></span></label>';
+    }).join('');
+    $('#profileDialog').showModal();
+  }
+
+  function saveProfile(event) {
+    event.preventDefault();
+    const data=new FormData(event.currentTarget);
+    const wall=data.getAll('keepsake').filter(id=>state.profile.earned.includes(id));
+    if (wall.length>wallLimit) return toast('展示墙最多放 3 件纪念品。');
+    state.profile.nickname=String(data.get('nickname')).trim();
+    state.profile.bio=String(data.get('bio')).trim();
+    state.profile.wall=wall;
+    save();
+    $('#profileDialog').close();
+    toast('个人档案已保存。');
+  }
+
   function go(page) {
+    activePage=page;
     all('.page').forEach(element=>element.classList.toggle('active',element.id===page));
     all('#nav button').forEach(button=>button.classList.toggle('active',button.dataset.page===page));
-    const labels={home:'探索首页',battle:'三票对局',collection:'卡牌工坊',rules:'游戏规则书',team:'校队正赛',developer:'开发者入口'};
+    const labels={home:'探索首页',battle:'三票对局',collection:'卡牌工坊',rules:'游戏规则书',team:'校队赛训',developer:'开发者入口'};
     $('#breadcrumb').textContent='校队世界 / '+labels[page];
     if (page==='battle') game ? renderGame() : startGame();
     if (page==='collection') renderWorkshop();
     if (page==='developer') renderCreator();
+    if (page==='team') training.render();
     window.scrollTo(0,0);
   }
 
@@ -98,14 +170,15 @@
     const playerTeam=team.length===4 ? team : [...R.initialTeam];
     const playerDeck=deck.length===15 ? deck : [...R.initialDeck];
     const enemyTeam=R.shuffle(R.baseCharacters.map(character=>character.id)).slice(0,4);
-    function side(ids, cards, training) {
+    function side(ids, cards, mastery) {
       const pile=R.shuffle(cards);
-      return {team:ids,pile,hand:pile.splice(0,4),training,remaining:Object.fromEntries(ids.map(id=>[id,2])),
+      return {team:ids,pile,hand:pile.splice(0,4),mastery,remaining:Object.fromEntries(ids.map(id=>[id,2])),
         bond:R.matchingBond(state.bonds,ids,options.characters)};
     }
-    game={...options,player:side(playerTeam,playerDeck,{...state.training}),enemy:side(enemyTeam,R.initialDeck,{}),
+    game={...options,player:side(playerTeam,playerDeck,{...state.mastery}),enemy:side(enemyTeam,R.initialDeck,{}),
       history:[],selection:[],slot:0,eventIndex:null,revealed:false,finished:false};
     if (team.length!==4 || deck.length!==15) toast('配置尚未完成，本局使用初始阵容或牌组。');
+    startClock();
     renderGame();
   }
 
@@ -117,6 +190,16 @@
   }
 
   function scopeLabel(scope) { return scopes.find(entry=>entry[0]===scope)?.[1]||'任意阶段'; }
+  function validArt(value) {
+    return typeof value==='string' && (value==='' ||
+      (value.length<=200000 && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)));
+  }
+
+  function artwork(item,kind) {
+    const image=item.art&&validArt(item.art)?'<img src="'+esc(item.art)+'" alt="" loading="lazy">':'<span aria-hidden="true">'+
+      esc(kind==='portrait'?item.name.slice(0,1):'◇')+'</span>';
+    return '<div class="card-art '+kind+'">'+image+'</div>';
+  }
   function currentRound() { return game.history.length-(game.revealed?1:0); }
 
   function pickCharacter(id) {
@@ -141,7 +224,7 @@
   function pickEnemy(round) {
     const {enemy,characters}=game;
     const lineup=R.legalLineups(enemy.team,enemy.remaining,round)
-      .map(ids=>({ids,priority:R.lineupBase(ids,characters,enemy.training,round)+Math.random()*18}))
+      .map(ids=>({ids,priority:R.lineupBase(ids,characters,enemy.mastery,round)+Math.random()*18}))
       .sort((a,b)=>b.priority-a.priority)[0].ids;
     const events=enemy.hand.map((id,index)=>({card:game.events[id],index}))
       .filter(({card})=>R.phaseMatches(card.phase,round));
@@ -149,21 +232,54 @@
     return {lineup,eventIndex:top && (round===5||Math.random()>.25) ? top.index : null};
   }
 
-  function reveal() {
+  function startClock() {
+    clearInterval(clock);
     const round=currentRound();
-    const lineup=legalChoices().find(choice=>fits(choice,game.selection));
-    if (!lineup || lineup.some((id,index)=>id!==game.selection[index])) return;
+    const seconds=R.allPhases[round].roles.length===2?roundSeconds.duo:roundSeconds.solo;
+    game.deadline=Date.now()+seconds*1000;
+    game.duration=seconds;
+    renderClock();
+    clock=setInterval(()=>{
+      if (Date.now()>=game.deadline) {
+        clearInterval(clock);
+        reveal(true);
+      } else renderClock();
+    },200);
+  }
+
+  function renderClock() {
+    const seconds=Math.max(0,Math.ceil((game.deadline-Date.now())/1000));
+    $('#roundClock').textContent=seconds+' 秒';
+    $('#clockBar').style.width=(seconds/game.duration*100)+'%';
+    $('#roundClock').classList.toggle('urgent',seconds<=5);
+  }
+
+  function reveal(timedOut=false) {
+    if (game.revealed || game.finished) return;
+    const round=currentRound();
+    timedOut=timedOut===true||Date.now()>=game.deadline;
+    const choices=legalChoices();
+    let lineup=choices.find(choice=>choice.every((id,index)=>id===game.selection[index]));
+    if (!lineup && timedOut) {
+      const compatible=choices.filter(choice=>fits(choice,game.selection));
+      lineup=(compatible.length?compatible:choices).reduce((best,choice)=>{
+        const score=ids=>R.lineupBase(ids,game.characters,game.player.mastery,round);
+        return !best||score(choice)>score(best)?choice:best;
+      },null);
+    }
+    if (!lineup) return;
+    clearInterval(clock);
     const opponent=pickEnemy(round);
     const getEvent=(side,index)=>index===null?null:game.events[side.hand[index]];
     const events={player:getEvent(game.player,game.eventIndex),enemy:getEvent(game.enemy,opponent.eventIndex)};
-    const result={};
+    const result={timedOut};
     for (const key of ['player','enemy']) {
       const own=game[key];
       const ids=key==='player'?lineup:opponent.lineup;
       const other=key==='player'?'enemy':'player';
       const event=events[key];
       result[key]={lineup:ids,event,...R.scoreRound({round,lineup:ids,characters:game.characters,
-        training:own.training,event,opponentEvent:events[other],bond:own.bond})};
+        mastery:own.mastery,event,opponentEvent:events[other],bond:own.bond})};
       own.remaining=R.spendAppearances(own.remaining,ids);
       const used=key==='player'?game.eventIndex:opponent.eventIndex;
       if (used!==null) own.hand.splice(used,1);
@@ -177,13 +293,22 @@
       game.finished=true;
       game.outcome=total>1.5?'胜利':total<1.5?'惜败':'平局';
       const won=total>1.5;
+      if (won) state.profile.hasWin=true;
       game.reward=won?[18,8,30]:[10,5,18];
       const [dust,ink,xp]=game.reward;
       state.dust+=dust; state.ink+=ink; state.xp+=xp;
+      game.masteryReward=[];
+      for (const id of game.player.team) {
+        const before=state.mastery[id]||0;
+        const after=R.addMastery(before,R.matchMastery);
+        state.mastery[id]=after;
+        if (after>before) game.masteryReward.push({name:game.characters[id].name,points:after-before,
+          promoted:R.gradeIndex(after)>R.gradeIndex(before)?grades[R.gradeIndex(after)]:''});
+      }
       save();
     }
     renderGame();
-    $('#roundResult').scrollIntoView({block:'nearest'});
+    if (activePage==='battle') $('#roundResult').scrollIntoView({block:'nearest'});
   }
 
   function advance() {
@@ -192,6 +317,7 @@
     game.eventIndex=null;
     game.slot=0;
     game.revealed=false;
+    startClock();
     renderGame();
   }
 
@@ -211,10 +337,17 @@
       '两位不同人物分别承担两个位置。点击当前已选人物可取消。':'派出一名人物，可以同时打出一张事件。';
     const result=$('#roundResult');
     result.innerHTML=game.revealed?renderResult(game.history[round],phase):'';
+    $('#clockWrap').hidden=game.revealed;
+    if (!game.revealed) renderClock();
     $('#battleControls').hidden=game.revealed;
     if (game.revealed) {
       if (game.finished) {
         const [dust,ink,xp]=game.reward;
+        if (game.masteryReward.length) {
+          const rewards=game.masteryReward.map(item=>esc(item.name)+' +'+item.points+
+            (item.promoted?'（升到'+item.promoted+'）':'')).join('、');
+          result.insertAdjacentHTML('beforeend','<p>人物熟练度 · '+rewards+'</p>');
+        }
         result.insertAdjacentHTML('beforeend','<div class="round-actions"><span>奖励 · '+dust+' 灵感 / '+ink+' 墨迹 / '+xp+' 经验</span><button class="primary" id="advanceRound">再来一局</button></div>');
         $('#advanceRound').onclick=startGame;
       } else {
@@ -227,7 +360,8 @@
   }
 
   function renderResult(past,phase) {
-    return '<div class="result-grid">'+['player','enemy'].map(key=>{
+    const notice=past.timedOut?'<p class="timeout-notice">时间到，已自动补齐空位并提交。</p>':'';
+    return notice+'<div class="result-grid">'+['player','enemy'].map(key=>{
       const side=past[key];
       const label=key==='player'?'你方':'对方';
       const names=side.lineup.map((id,i)=>phase.roles[i]+' '+esc(game.characters[id].name)).join(' · ');
@@ -251,7 +385,7 @@
       candidate[game.slot]=id;
       const legal=choices.some(lineup=>fits(lineup,candidate));
       return '<button class="roster-card '+(game.selection.includes(id)?'chosen':'')+'" data-pick="'+index+
-        '" '+(legal?'':'disabled')+'><small>'+esc(person.campus)+' · '+grades[person.grade]+'</small><strong>'+esc(person.name)+
+        '" '+(legal?'':'disabled')+'>'+artwork(person,'portrait')+'<small>'+esc(person.campus)+' · '+grades[R.gradeIndex(player.mastery[id])]+'</small><strong>'+esc(person.name)+
         '</strong><span>剩余 '+player.remaining[id]+' 次</span></button>';
     }).join('');
     all('[data-pick]').forEach(button=>button.onclick=()=>pickCharacter(player.team[Number(button.dataset.pick)]));
@@ -260,7 +394,7 @@
     hand.innerHTML=player.hand.length?player.hand.map((id,index)=>{
       const event=game.events[id];
       return '<button class="game-card event '+(game.eventIndex===index?'selected':'')+'" data-hand="'+index+'" '+
-        (R.phaseMatches(event.phase,round)?'':'disabled')+'><span class="card-top">'+scopeLabel(event.phase)+
+        (R.phaseMatches(event.phase,round)?'':'disabled')+'>'+artwork(event,'illustration')+'<span class="card-top">'+scopeLabel(event.phase)+
         '</span><strong>'+esc(event.name)+'</strong><p>'+describeEvent(event)+'</p></button>';
     }).join(''):'<p>当前没有事件手牌。</p>';
     hand.scrollLeft=handScroll;
@@ -271,7 +405,7 @@
     });
     const ready=choices.some(lineup=>lineup.every((id,index)=>id===game.selection[index]));
     $('#confirmRound').disabled=!ready;
-    $('#estimate').textContent=ready?'预计基础分 '+fmt(R.lineupBase(game.selection,game.characters,player.training,round)):'先选齐本轮出场人物';
+    $('#estimate').textContent=ready?'预计基础分 '+fmt(R.lineupBase(game.selection,game.characters,player.mastery,round)):'先选齐本轮出场人物';
   }
 
   function renderWorkshop() {
@@ -281,13 +415,23 @@
     $('#deckCounter').textContent=state.deck.length+' / 15';
     $('#characterGrid').innerHTML=Object.values(characters).map((person,index)=>{
       const inTeam=state.team.includes(person.id);
-      const tier=state.training[person.id]||0;
-      return '<article class="workshop-card '+(inTeam?'chosen':'')+'"><span class="kicker">'+esc(person.campus)+
-        (person.college?' · '+esc(person.college):'')+'</span><h3>'+esc(person.name)+'</h3><small>'+grades[person.grade]+' · 培养 '+tier+
-        '</small><p class="stat-line">'+person.stats.map((stat,i)=>R.statNames[i]+' '+stat).join(' · ')+'</p>'+
+      const mastery=state.mastery[person.id]||0;
+      const grade=R.gradeIndex(mastery);
+      const next=R.gradeThresholds[grade+1];
+      const attributes=R.effectiveStats(person,mastery);
+      const boost=workshopBoost(mastery);
+      const talents=person.talents.map(item=>esc(item.name)+' · '+(item.tier<=grade?'已解锁':grades[item.tier]+'解锁'));
+      const life=person.life?'<p class="life-story"><strong>'+R.lifeNames[person.life]+
+        '</strong> · '+(next?'大四解锁':esc(person.lifeStory||'已解锁'))+'</p>':'';
+      return '<article class="workshop-card '+(inTeam?'chosen':'')+'">'+artwork(person,'portrait')+'<span class="kicker">'+esc(person.campus)+
+        (person.college?' · '+esc(person.college):'')+'</span><h3>'+esc(person.name)+'</h3><small>'+grades[grade]+
+        ' · '+(next?'熟练度 '+mastery+' / '+next:'已达本科成长上限')+'</small>'+
+        '<p class="stat-line">'+attributes.map((stat,i)=>R.statNames[i]+' '+stat).join(' · ')+'</p>'+
+        (person.growthNote?'<p>'+esc(person.growthNote)+'</p>':'')+
+        (talents.length?'<p>天赋：'+talents.join('；')+'</p>':'')+life+
         '<div class="form-actions"><button class="secondary" data-team-pick="'+index+'">'+(inTeam?'移出阵容':'加入阵容')+'</button>'+
-        '<button class="chip" data-upgrade="'+index+'" '+(tier>=upgrades.length?'disabled':'')+'>'+
-        (tier>=upgrades.length?'已满阶':'培养 · '+upgrades[tier]+' 墨迹')+'</button></div></article>';
+        (boost.points?'<button class="chip" data-upgrade="'+index+'">'+boost.cost+' 墨迹换 '+boost.points+' 熟练度</button>':'')+
+        '</div></article>';
     }).join('');
     const people=Object.values(characters);
     all('[data-team-pick]').forEach(button=>button.onclick=()=>{
@@ -299,17 +443,20 @@
     });
     all('[data-upgrade]').forEach(button=>button.onclick=()=>{
       const {id}=people[Number(button.dataset.upgrade)];
-      const tier=state.training[id]||0;
-      if (state.ink<upgrades[tier]) return toast('墨迹不足，可以通过对局获得。');
-      if (tier>=upgrades.length) return;
-      state.ink-=upgrades[tier];
-      state.training[id]=tier+1;
+      const before=state.mastery[id]||0;
+      const {points,cost}=workshopBoost(before);
+      if (!points) return;
+      if (state.ink<cost) return toast('墨迹不足，可以通过对局获得。');
+      state.ink-=cost;
+      state.mastery[id]=R.addMastery(before,points);
+      const grade=R.gradeIndex(state.mastery[id]);
+      if (grade>R.gradeIndex(before)) toast('已升到'+grades[grade]+'。');
       save(); renderWorkshop();
     });
     const items=Object.values(events);
     $('#eventGrid').innerHTML=items.map((event,index)=>{
       const count=state.deck.filter(id=>id===event.id).length;
-      return '<article class="workshop-card '+(count?'chosen':'')+'"><span class="kicker">'+scopeLabel(event.phase)+
+      return '<article class="workshop-card '+(count?'chosen':'')+'">'+artwork(event,'illustration')+'<span class="kicker">'+scopeLabel(event.phase)+
         '</span><h3>'+esc(event.name)+'</h3><p>'+describeEvent(event)+'</p><div class="event-quantity"><button class="chip" data-remove-event="'+
         index+'" aria-label="移出一张 '+esc(event.name)+'" '+(count?'':'disabled')+'>−</button><strong>'+count+
         ' / 2</strong><button class="chip" data-add-event="'+index+'" aria-label="加入一张 '+esc(event.name)+
@@ -325,6 +472,12 @@
     });
   }
 
+  function workshopBoost(mastery) {
+    const {cost,points}=R.inkMastery;
+    const gain=R.addMastery(mastery,points)-mastery;
+    return {points:gain,cost:Math.ceil(cost*gain/points)};
+  }
+
   function newId(prefix) {
     return prefix+'-'+(globalThis.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2));
   }
@@ -338,6 +491,45 @@
   }
   const number=(label,name,value,min,max)=>input(label,name,value,'type="number" min="'+min+'" max="'+max+'" step="1" required');
   const lore=value=>'<label>故事／校队梗<textarea name="lore" rows="3" maxlength="120">'+esc(value)+'</textarea></label>';
+
+  function artEditor(kind) {
+    const label=kind==='portrait'?'人物立绘':'事件插图';
+    return '<div class="art-editor"><div id="artPreview"></div><div><label>'+label+
+      '（JPEG、PNG、WebP）<input type="file" id="artFile" accept="image/jpeg,image/png,image/webp"></label>'+
+      '<button class="chip" type="button" id="clearArt">清除图片</button></div></div>';
+  }
+
+  function bindArtEditor(item,kind,form) {
+    creatorArt=item.art||'';
+    const picker=$('#artFile');
+    const show=()=>{$('#artPreview').innerHTML=artwork({name:item.name||'图',art:creatorArt},kind);};
+    show();
+    $('#clearArt').onclick=()=>{creatorArt='';picker.value='';show();};
+    picker.onchange=async ()=>{
+      const file=picker.files[0];
+      if (!file) return;
+      if (!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>8*1024*1024) {
+        picker.value='';
+        return toast('请选择小于 8 MB 的 JPEG、PNG 或 WebP。');
+      }
+      const submit=form.querySelector('[type=submit]');
+      submit.disabled=true;
+      let bitmap;
+      try {
+        bitmap=await createImageBitmap(file);
+        const scale=Math.min(1,600/Math.max(bitmap.width,bitmap.height));
+        const canvas=document.createElement('canvas');
+        canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+        canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+        canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
+        let image=canvas.toDataURL('image/webp',.85);
+        if (!validArt(image)) image=canvas.toDataURL('image/webp',.62);
+        if (!validArt(image)) throw Error();
+        if ($('#artFile')===picker) {creatorArt=image;show();}
+      } catch { toast('图片无法处理，请试试尺寸更小的图片。'); }
+      finally {bitmap?.close();submit.disabled=false;picker.value='';}
+    };
+  }
 
   function creatorItems() {
     const {characters,events}=catalogs();
@@ -361,11 +553,19 @@
     all('[data-edit]').forEach(button=>button.onclick=()=>{editing=items[Number(button.dataset.edit)].id;renderCreator();$('#creatorForm').scrollIntoView({block:'nearest'});});
     let fields=input(schema[tab].label+'名称','name',item.name,'required maxlength="30"');
     if (tab==='character') {
-      fields+='<div class="form-row">'+select('校区','campus',camp,item.campus)+select('年级','grade',grades.map((grade,i)=>[i,grade]),item.grade)+
-        '</div>'+input('学院（可以留空）','college',item.college,'maxlength="40"')+
-        '<div class="attribute-fields">'+R.statNames.map((name,i)=>number(name,'stat'+i,item.stats?.[i]??65,0,100)).join('')+'</div>'+lore(item.lore);
+      fields+='<div class="form-row">'+select('校区','campus',camp,item.campus)+
+        input('学院（可以留空）','college',item.college,'maxlength="40"')+'</div>'+
+        '<p class="form-note">填写各年级五项属性的最终值。新人物从大一开始。</p>'+
+        grades.map((grade,year)=>'<fieldset class="grade-fields"><legend>'+grade+'</legend><div class="attribute-fields">'+
+          R.statNames.map((name,i)=>number(name,'panel'+year+'_'+i,item.panels?.[year]?.[i]??(65+year*3),0,200)).join('')+
+          '</div></fieldset>').join('')+
+        '<label>成长方向（选填）<textarea name="growthNote" rows="2" maxlength="160">'+esc(item.growthNote)+'</textarea></label>'+
+        select('大四生涯路线','life',lifeOptions,item.life)+
+        '<label>生涯故事（选填）<textarea name="lifeStory" rows="3" maxlength="160">'+esc(item.lifeStory)+'</textarea></label>'+
+        artEditor('portrait')+lore(item.lore);
     } else {
-      if (tab==='talent') fields+=select('所属人物','character',persons,item.character)+number('解锁培养阶','tier',item.tier??1,0,3);
+      if (tab==='talent') fields+=select('所属人物','character',persons,item.character)+
+        select('解锁年级','tier',grades.map((grade,i)=>[i,grade]),item.tier??1);
       if (tab==='bond') fields+=select('羁绊类型','kind',[['campus','同校区'],['college','同学院'],['pair','指定人物搭配']],item.kind)+
         '<div data-bond-fields="campus">'+select('校区','campus',camp,item.campus||item.key)+'</div>'+
         '<div data-bond-fields="college">'+input('学院','college',item.kind==='college'?item.key:'','maxlength="40"')+'</div>'+
@@ -376,12 +576,13 @@
       fields+='<div class="form-row">'+select('生效阶段','phase',scopes,item.phase)+
         select('效果','effect',tab==='event'?eventEffects:scoreEffects,item.effect)+'</div>'+
         number('效果数值（分 / % / 张）','value',item.value??4,0,25);
-      if (tab==='event') fields+=lore(item.lore);
+      if (tab==='event') fields+=artEditor('illustration')+lore(item.lore);
     }
     const form=$('#creatorForm');
     form.innerHTML='<h2>'+(item.id?'编辑':'新建')+schema[tab].label+'</h2>'+fields+
       '<div class="form-actions"><button class="primary" type="submit">保存</button><button class="secondary" type="button" id="clearCreator">'+
       (item.id?'新建一项':'清空表单')+'</button></div>';
+    if (tab==='character'||tab==='event') bindArtEditor(item,tab==='character'?'portrait':'illustration',form);
     $('#clearCreator').onclick=()=>{editing=null;renderCreator();};
     if (tab==='bond') {
       const toggle=()=>{
@@ -403,12 +604,16 @@
     const type=schema[tab];
     const entry={id:editing||newId(type.prefix),name:values.name.trim()};
     if (!entry.name) return toast('请输入名称。');
-    if (tab==='character') Object.assign(entry,{campus:values.campus,college:values.college.trim(),
-      grade:Number(values.grade),stats:R.statNames.map((_,i)=>Number(values['stat'+i])),lore:values.lore.trim()});
-    else {
+    if (tab==='character') {
+      Object.assign(entry,{campus:values.campus,college:values.college.trim(),
+        panels:grades.map((_,year)=>R.statNames.map((_,i)=>Number(values['panel'+year+'_'+i]))),
+        growthNote:values.growthNote.trim(),art:creatorArt,lore:values.lore.trim(),
+        life:values.life,lifeStory:values.lifeStory.trim()});
+    } else {
       Object.assign(entry,{phase:values.phase,effect:values.effect,value:Number(values.value)});
       if (tab==='event') {
         entry.lore=values.lore.trim();
+        entry.art=creatorArt;
         if (entry.effect==='guard') entry.value=0;
         if (entry.effect==='draw' && (entry.value<1||entry.value>3)) return toast('抽牌数量请设为 1 至 3。');
       }
@@ -421,14 +626,17 @@
         if (entry.together&&entry.count>2) return toast('同轮出场条件最多支持 2 人。');
       }
     }
-    const destination=state[type.key];
-    const index=destination.findIndex(item=>item.id===entry.id);
-    if (index>=0) destination[index]=entry;
-    else destination.push(entry);
+    const entries=Object.values(merge(state[type.key],[entry]));
+    if (!fitsStorage({[type.key]:entries})) return toast('本机图片存储空间不足，请缩小或清除部分图片。');
+    state[type.key]=entries;
     save();
     editing=entry.id;
     renderCreator();
     toast('已保存，下次开局生效。');
+  }
+
+  function fitsStorage(changes) {
+    return JSON.stringify({...state,...changes}).length<=3_000_000;
   }
 
   function validateContent(data) {
@@ -440,9 +648,11 @@
     const score=(entry,allowEvents)=>scopes.some(([name])=>name===entry.phase)&&
       (allowEvents?eventEffects:scoreEffects).some(([effect])=>effect===entry.effect)&&integer(entry.value,0,25);
     const validators={
-      characters:c=>R.campuses.includes(c.campus)&&text(c.college,40)&&integer(c.grade,0,3)&&
-        Array.isArray(c.stats)&&c.stats.length===5&&c.stats.every(n=>integer(n,0,100))&&text(c.lore,120),
-      events:c=>score(c,true)&&text(c.lore,120)&&(c.effect!=='draw'||integer(c.value,1,3)),
+      characters:c=>R.campuses.includes(c.campus)&&text(c.college,40)&&text(c.growthNote,160)&&validArt(c.art)&&
+        (c.life===''||Object.hasOwn(R.lifeNames,c.life))&&text(c.lifeStory,160)&&
+        Array.isArray(c.panels)&&c.panels.length===4&&c.panels.every(panel=>
+          Array.isArray(panel)&&panel.length===5&&panel.every(n=>integer(n,0,200)))&&text(c.lore,120),
+      events:c=>score(c,true)&&text(c.lore,120)&&validArt(c.art||'')&&(c.effect!=='draw'||integer(c.value,1,3)),
       talents:c=>score(c,false)&&integer(c.tier,0,3)&&id(c.character),
       bonds:c=>score(c,false)&&typeof c.together==='boolean'&&integer(c.count,2,c.together?2:4)&&
         ((c.kind==='pair'&&c.count===2&&id(c.first)&&id(c.second)&&c.first!==c.second)||
@@ -457,16 +667,15 @@
     return checked;
   }
 
+  const training=globalThis.BianyuTraining.mount({state,save,toast,esc,newId});
   $('#nav').addEventListener('click',event=>{
     const button=event.target.closest('[data-page]');
     if (button) go(button.dataset.page);
   });
   all('[data-go]').forEach(button=>button.onclick=()=>go(button.dataset.go));
-  $('#collegeGrid').innerHTML=sampleCampusColleges.map(name=>'<button type="button">'+esc(name)+'</button>').join('');
-  all('#collegeGrid button').forEach(button=>button.onclick=()=>{
-    state.college=button.textContent; save(); $('#collegeDialog').close(); toast('学院身份已选择。');
-  });
-  $('#profileBtn').onclick=$('#collegeBtn').onclick=()=>$('#collegeDialog').showModal();
+  $('#profileBtn').onclick=$('#editProfile').onclick=openProfile;
+  $('#profileForm').onsubmit=saveProfile;
+  $('#closeProfile').onclick=()=>$('#profileDialog').close();
   $('#newGame').onclick=()=>{
     if (game.history.length&&!game.finished&&!window.confirm('重新开局会放弃当前进度，继续吗？')) return;
     startGame();
@@ -475,10 +684,10 @@
   $('#resetDeck').onclick=()=>{state.team=[...R.initialTeam];state.deck=[...R.initialDeck];save();renderWorkshop();};
   $('#exportCards').onclick=()=>{
     const content=Object.fromEntries(Object.values(schema).map(({key})=>[key,state[key]]));
-    const url=URL.createObjectURL(new Blob([JSON.stringify({format:'bianyu-three-votes-v1',...content},null,2)],{type:'application/json'}));
+    const url=URL.createObjectURL(new Blob([JSON.stringify({format:'bianyu-three-votes-v3',...content},null,2)],{type:'application/json'}));
     const link=document.createElement('a');
     link.href=url;
-    link.download='辩域三票内容.json';
+    link.download='辩士山大内容.json';
     link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
@@ -486,22 +695,29 @@
     const file=event.target.files?.[0];
     if (!file) return;
     try {
-      if (file.size>1000000) throw Error();
+      if (file.size>4_000_000) throw Error();
       const content=JSON.parse(await file.text());
-      const data=content.format==='bianyu-cards-v1'&&Array.isArray(content.cards)?fromLegacy(content.cards):
-        content.format==='bianyu-three-votes-v1'?content:null;
+      let data=null;
+      if (content.format==='bianyu-cards-v1'&&Array.isArray(content.cards)) data=fromLegacy(content.cards);
+      if (['bianyu-three-votes-v1','bianyu-three-votes-v2'].includes(content.format)) {
+        data={...content,characters:(content.characters||[]).map(normalizeCharacter)};
+      }
+      if (content.format==='bianyu-three-votes-v3') data=content;
       if (!data) throw Error();
       const checked=validateContent(data);
       let added=0;
+      const changes={};
       for (const [key,items] of Object.entries(checked)) {
-        state[key]=Object.values(merge(state[key],items));
+        changes[key]=Object.values(merge(state[key],items));
         added+=items.length;
       }
+      if (!fitsStorage(changes)) {toast('本机存储空间不足，请减少导入图片。');return;}
+      Object.assign(state,changes);
       save(); renderCreator();
       toast('已导入 '+added+' 项设计。同 ID 内容已更新。');
     } catch { toast('无法导入，请检查 JSON 文件及字段格式。'); }
     event.target.value='';
   };
+  syncKeepsakes();
   renderProfile();
-  if (!state.college) $('#collegeDialog').showModal();
 })();
