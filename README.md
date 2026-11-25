@@ -4,7 +4,7 @@
 
 辩士山大是一款校园辩论主题的网页卡牌游戏，目前开放内测。
 
-[开始试玩](https://bianyu-card-game-20261124.liuxiaoennick.chatgpt.site)
+[开始试玩](https://anyingaihaozhe.github.io/debate_game/)
 
 ## 怎么玩
 
