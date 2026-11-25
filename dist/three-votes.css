@@ -1,0 +1,21 @@
+.vote-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.vote-tile{display:grid;gap:6px;padding:15px 18px;background:#171f38;border:1px solid #394565;border-radius:14px}
+.vote-tile.current{background:#30254f;border-color:#9e80ed}.vote-tile span{color:#b7a4f3;font-size:14px}
+.vote-tile strong{font-size:17px}.round-panel h2{margin:8px 0 6px}.round-panel>p{margin-bottom:0}
+.pick-header,.round-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 10px}
+.pick-header h2{font-size:1.1rem;margin:0}.role-picks{display:flex;gap:8px;flex-wrap:wrap}
+.roster-picks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.roster-card,.workshop-card{min-width:0;text-align:left;background:#1d2744;border:1px solid #424e74;border-radius:13px;color:#e9ebff;padding:13px}
+.roster-card{display:grid;gap:7px}.roster-card span{font-size:13px;color:#a9b5d6}
+.chosen{border-color:#a88aff;background:#30264f}.roster-card:not(:disabled):hover{border-color:#dac7ff}
+.round-result:empty{display:none}.round-result{margin-top:16px}.round-actions{margin-top:13px}
+.result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.result-grid>div{background:#222b49;padding:14px;border-radius:12px}
+.result-grid strong{display:block;font-size:27px;color:#cdb3ff;margin:5px 0}.result-grid p{margin:6px 0;font-size:14px}
+.workshop-panel{margin-bottom:18px}.workshop-panel .pick-header{margin-top:0}
+.workshop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:11px;margin:0 0 13px}
+.workshop-card h3{margin:7px 0}.workshop-card p{font-size:14px;margin:8px 0}.workshop-card .stat-line{line-height:1.5}
+.event-quantity{display:flex;gap:10px;align-items:center}.event-quantity button{min-width:42px}
+.creator-tabs{margin-bottom:14px}.attribute-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:10px}
+.dev-form h2{margin:0}.custom-list{max-height:460px;overflow:auto}.custom-item strong{overflow-wrap:anywhere}
+#battleControls[hidden],[data-bond-fields][hidden]{display:none}
+@media(max-width:700px){.vote-board{gap:6px}.vote-tile{padding:10px}.vote-tile strong{font-size:14px}.roster-picks{grid-template-columns:repeat(2,minmax(0,1fr))}.result-grid{gap:6px}.result-grid>div{padding:10px}.workshop-grid{grid-template-columns:repeat(auto-fill,minmax(145px,1fr))}.page-head{align-items:flex-start}.page-head .secondary,.page-head .primary{flex-shrink:0;font-size:13px;padding:10px}}
