@@ -242,7 +242,7 @@
     clock=setInterval(()=>{
       if (Date.now()>=game.deadline) {
         clearInterval(clock);
-        reveal(true);
+        reveal('timeout');
       } else renderClock();
     },200);
   }
@@ -254,13 +254,15 @@
     $('#roundClock').classList.toggle('urgent',seconds<=5);
   }
 
-  function reveal(timedOut=false) {
+  function reveal(mode='confirm') {
     if (game.revealed || game.finished) return;
     const round=currentRound();
-    timedOut=timedOut===true||Date.now()>=game.deadline;
+    const timedOut=mode==='timeout'||Date.now()>=game.deadline;
+    const skipped=mode==='skip'&&!timedOut;
     const choices=legalChoices();
     let lineup=choices.find(choice=>choice.every((id,index)=>id===game.selection[index]));
-    if (!lineup && timedOut) {
+    const autoFilled=!lineup&&(timedOut||skipped);
+    if (autoFilled) {
       const compatible=choices.filter(choice=>fits(choice,game.selection));
       lineup=(compatible.length?compatible:choices).reduce((best,choice)=>{
         const score=ids=>R.lineupBase(ids,game.characters,game.player.mastery,round);
@@ -272,7 +274,7 @@
     const opponent=pickEnemy(round);
     const getEvent=(side,index)=>index===null?null:game.events[side.hand[index]];
     const events={player:getEvent(game.player,game.eventIndex),enemy:getEvent(game.enemy,opponent.eventIndex)};
-    const result={timedOut};
+    const result={timedOut,skipped,autoFilled};
     for (const key of ['player','enemy']) {
       const own=game[key];
       const ids=key==='player'?lineup:opponent.lineup;
@@ -360,7 +362,9 @@
   }
 
   function renderResult(past,phase) {
-    const notice=past.timedOut?'<p class="timeout-notice">时间到，已自动补齐空位并提交。</p>':'';
+    const submission=past.timedOut?'时间到':past.skipped?'已跳过等待':'';
+    const notice=submission?'<p class="timeout-notice">'+submission+
+      (past.autoFilled?'，已自动补齐空位并提交。':'，已提交本轮出牌。')+'</p>':'';
     return notice+'<div class="result-grid">'+['player','enemy'].map(key=>{
       const side=past[key];
       const label=key==='player'?'你方':'对方';
@@ -680,7 +684,8 @@
     if (game.history.length&&!game.finished&&!window.confirm('重新开局会放弃当前进度，继续吗？')) return;
     startGame();
   };
-  $('#confirmRound').onclick=reveal;
+  $('#confirmRound').onclick=()=>reveal();
+  $('#skipWait').onclick=()=>reveal('skip');
   $('#resetDeck').onclick=()=>{state.team=[...R.initialTeam];state.deck=[...R.initialDeck];save();renderWorkshop();};
   $('#exportCards').onclick=()=>{
     const content=Object.fromEntries(Object.values(schema).map(({key})=>[key,state[key]]));
