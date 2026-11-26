@@ -17,7 +17,7 @@
       <div id="battleControls">
         <div class="pick-header"><h2>本轮出场</h2><div id="rolePicks" class="role-picks"></div></div><div id="rosterPicks" class="roster-picks"></div>
         <div class="pick-header"><h2>事件手牌</h2><span class="muted">每轮可打出 1 张，也可留牌</span></div><div id="hand" class="hand"></div>
-        <div class="round-actions"><span id="estimate" class="muted"></span><button class="primary" id="confirmRound">确认出场</button></div>
+        <div class="round-actions"><span id="estimate" class="muted"></span><div class="form-actions"><button class="secondary" id="skipWait">跳过等待</button><button class="primary" id="confirmRound">确认出场</button></div></div>
       </div>
     </div><div class="battle-side"><div class="panel"><span class="kicker">对局记录</span><div class="log" id="battleLog"></div></div><div class="panel"><h3>玩法帮助</h3><p>印象两轮 · 环节三轮 · 决胜一轮</p><button class="secondary" data-go="rules">查看规则书</button></div></div></div>
   </section>
@@ -35,7 +35,7 @@
         <li><strong>印象 · 第 1、2 轮</strong><p>各派一人，陈词和风度占主要权重。两轮得分相加，第 2 轮结束就锁票。</p></li>
         <li><strong>环节 · 第 3、4、5 轮</strong><p>第 3 轮由一人质询，第 4 轮两人担任主攻与接应，第 5 轮两人担任归纳与补位。每轮独立比较，两轮获胜即可拿下环节票。单轮同分各记半个小环节。</p></li>
         <li><strong>决胜 · 第 6 轮</strong><p>各派一人结辩。决胜分 = 前五轮平均得分 × 30% + 第六轮得分 × 70%。</p></li>
-      </ol><p>单人轮限时 25 秒，双人轮限时 35 秒。到时会保留已选人物与事件，补齐人物空位后自动提交。每轮结算画面不限时。</p><div class="rule-example"><strong>双人轮怎么选</strong><p>先点一个角色位置，再选人物。两位人物的分工有不同权重，换顺序可能改变得分。每个人物最多上场两次，系统会禁止让后续轮次凑不齐人的组合。</p></div></article>
+      </ol><p>单人轮限时 25 秒，双人轮限时 35 秒。点「跳过等待」可提前结算。提前结算和超时都会保留已选人物与事件，自动补齐人物空位。每轮结算画面不限时。</p><div class="rule-example"><strong>双人轮怎么选</strong><p>先点一个角色位置，再选人物。两位人物的分工有不同权重，换顺序可能改变得分。每个人物最多上场两次，系统会禁止让后续轮次凑不齐人的组合。</p></div></article>
       <article class="panel rule-block"><h2>属性、事件、天赋与羁绊</h2><p>人物的有效属性由大一面板和升年级增加的属性组成。五项属性在不同阶段有不同权重。双人轮取两人按各自位置算出的基础分的平均值。</p><p>最终得分 =（阶段基础分 + 固定加减分）×（1 + 百分比修正）。百分比修正相加，最高 25%。分数保留两位小数，最低为零。</p><p>每轮可打 1 张符合阶段条件的事件牌，双方提交后共同结算。保护牌挡掉对方的减分事件，抽牌事件在本轮后生效。天赋按年级解锁，满足适用阶段时生效。每队按配置顺序启用第一条满足阵容条件的羁绊。</p></article>
       <article class="panel rule-block"><h2>判胜与年级成长</h2><p>同票分数相同则双方各得半票，三票合计更高的一方获胜。胜利奖励 18 灵感、8 墨迹、30 经验，失利或平局奖励 10 灵感、5 墨迹、18 经验。</p><p>人物从大一开始。每打完一局，四名出场人物各得 6 熟练度，也可在工坊用 8 墨迹换 15 熟练度。累计达到 30、75、135 分别升到大二、大三、大四。临近上限时按实际兑换点数折算墨迹。</p><p>五项属性按人物各年级的独立面板结算。开发者可逐年填写面板，也可以记录成长方向作为数值设计参考。大四可解锁已配置的毕业或读研故事，三条生涯路线的数值上限相同。存档保存在当前浏览器。</p></article>
     </div>
